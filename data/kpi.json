@@ -1,0 +1,8 @@
+[
+  { "id": "sample-1", "month": "2026-09", "team": "영업A", "target": 10000000, "actual": 9000000 },
+  { "id": "sample-2", "month": "2026-09", "team": "영업B", "target": 8000000, "actual": 8800000 },
+  { "id": "sample-3", "month": "2026-09", "team": "영업C", "target": 12000000, "actual": 10800000 },
+  { "id": "sample-4", "month": "2026-10", "team": "영업A", "target": 10000000, "actual": 11000000 },
+  { "id": "sample-5", "month": "2026-10", "team": "영업B", "target": 8000000, "actual": 7200000 },
+  { "id": "sample-6", "month": "2026-10", "team": "영업C", "target": 12000000, "actual": 12600000 }
+]

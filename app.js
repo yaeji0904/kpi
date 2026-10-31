@@ -1,4 +1,4 @@
-/* KPI 화면과 사용자 동작 */
+/* Supabase 로그인 상태에 따라 본인 KPI만 표시하는 화면 동작 */
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -6,9 +6,22 @@
   const rateText = value => value === null ? '목표 미설정' : Number.isInteger(value) ? value + '%' : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') + '%';
   const monthText = value => value.replace('-', '.');
   let allRows = [];
+  let currentUser = null;
+  let configured = false;
 
-  function filteredRows() {
-    return allRows.filter(row => (!$('month-filter').value || row.month === $('month-filter').value) && (!$('team-filter').value || row.team === $('team-filter').value));
+  function authMessage(message, isError = false) {
+    const el = $('auth-message'); el.textContent = message; el.classList.toggle('error', isError);
+  }
+  function formMessage(message, isError = false) {
+    const el = $('form-message'); el.textContent = message; el.classList.toggle('error', isError);
+  }
+  function clearDashboard() {
+    allRows = [];
+    $('evidence-rows').replaceChildren(); $('chart').replaceChildren();
+    $('target-total').textContent = '—'; $('actual-total').textContent = '—'; $('achievement-rate').textContent = '—';
+    $('row-count').textContent = '0건'; $('result-caption').textContent = '';
+    $('table-state').hidden = true; $('table-state').classList.remove('error');
+    $('month-filter').value = ''; $('team-filter').value = '';
   }
   function setOptions(id, values, label) {
     const select = $(id), previous = select.value;
@@ -20,6 +33,10 @@
     const td = document.createElement('td'); td.textContent = value;
     if (className) td.className = className;
     row.append(td); return td;
+  }
+  function filteredRows() {
+    return allRows.filter(row => (!$('month-filter').value || row.month === $('month-filter').value)
+      && (!$('team-filter').value || row.team === $('team-filter').value));
   }
   function render() {
     const rows = filteredRows(), total = KPICore.summarize(rows);
@@ -53,32 +70,119 @@
       line.append(name, track, rate); chart.append(line);
     }
   }
-  async function refresh() {
+  async function refresh(userId = currentUser?.id) {
+    if (!userId || currentUser?.id !== userId) return false;
+    const state = $('table-state'); state.hidden = false; state.classList.remove('error'); state.textContent = '저장된 KPI를 불러오는 중입니다.';
     try {
-      allRows = await KPIStore.readAll();
+      const nextRows = await KPIStore.readAll(userId);
+      if (currentUser?.id !== userId) return false;
+      allRows = nextRows;
       setOptions('month-filter', allRows.map(row => row.month), '전체 월');
       setOptions('team-filter', allRows.map(row => row.team), '전체 부서');
       render();
+      return true;
     } catch (error) {
-      const state = $('table-state'); state.hidden = false; state.classList.add('error');
-      state.textContent = '데이터를 불러오지 못했습니다. ' + error.message;
+      if (currentUser?.id !== userId) return false;
+      state.hidden = false; state.classList.add('error');
+      state.textContent = '저장된 데이터를 불러오지 못했습니다. ' + error.message;
       $('evidence-rows').replaceChildren(); $('chart').textContent = '데이터를 불러오지 못했습니다.';
+      $('target-total').textContent = '—'; $('actual-total').textContent = '—'; $('achievement-rate').textContent = '—';
+      allRows = [];
+      return false;
     }
   }
+  async function applySession(session) {
+    const nextUser = session?.user || null;
+    if (!nextUser) {
+      const wasSignedIn = !!currentUser;
+      currentUser = null; clearDashboard(); $('dashboard').hidden = true;
+      $('auth-user').hidden = true; $('logout-button').hidden = true;
+      $('login-form').hidden = !configured;
+      $('connection-label').textContent = configured ? '로그인 필요' : 'Supabase 미설정';
+    $('connection-pill').classList.toggle('is-connected', false);
+    $('connection-pill').classList.toggle('is-error', !configured);
+      if (configured && wasSignedIn) authMessage('로그아웃되었습니다.');
+      return;
+    }
+    const changedUser = currentUser?.id !== nextUser.id;
+    if (changedUser) clearDashboard();
+    currentUser = nextUser;
+    $('dashboard').hidden = false; $('login-form').hidden = true;
+    $('auth-user').hidden = false; $('auth-user').textContent = nextUser.email || '로그인 사용자';
+    $('logout-button').hidden = false; $('connection-label').textContent = 'Supabase 연결';
+    $('connection-pill').classList.add('is-connected'); $('connection-pill').classList.remove('is-error');
+    authMessage('로그인되었습니다. 본인 계정의 KPI만 조회합니다.');
+    if (changedUser) await refresh(nextUser.id);
+  }
+
   $('month-filter').addEventListener('change', render);
   $('team-filter').addEventListener('change', render);
   $('reset-filters').addEventListener('click', () => { $('month-filter').value = ''; $('team-filter').value = ''; render(); });
+  $('login-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = $('login-button'); button.disabled = true; button.textContent = '로그인 중…';
+    authMessage('로그인 요청 중입니다.');
+    try {
+      const { data, error } = await KPIStore.signIn($('login-email').value.trim(), $('login-password').value);
+      if (error) throw error;
+      $('login-password').value = '';
+      await applySession(data.session);
+    } catch (error) {
+      $('connection-pill').classList.add('is-error'); $('connection-pill').classList.remove('is-connected');
+      authMessage('로그인하지 못했습니다. 이메일·비밀번호와 Supabase Auth 설정을 확인해 주세요. ' + (error.message || ''), true);
+    } finally { button.disabled = false; button.textContent = '로그인'; }
+  });
+  $('logout-button').addEventListener('click', async () => {
+    $('logout-button').disabled = true;
+    try {
+      const { error } = await KPIStore.signOut();
+      if (error) throw error;
+      await applySession(null);
+    } catch (error) { authMessage('로그아웃하지 못했습니다. ' + (error.message || ''), true); }
+    finally { $('logout-button').disabled = false; }
+  });
   $('kpi-form').addEventListener('submit', async event => {
     event.preventDefault();
-    const message = $('form-message'); message.textContent = ''; message.classList.remove('error');
+    if (!currentUser) { formMessage('먼저 로그인해 주세요.', true); return; }
+    const userId = currentUser.id, button = $('kpi-form').querySelector('button[type="submit"]');
+    button.disabled = true; button.textContent = '저장 중…'; formMessage('Supabase에 저장 중입니다.');
     try {
       const record = KPICore.validateRecord({ month: $('entry-month').value, team: $('entry-team').value, target: $('entry-target').value, actual: $('entry-actual').value });
       await KPIStore.create(record);
+      if (currentUser?.id !== userId) return;
       $('kpi-form').reset(); $('entry-month').value = '2026-10';
-      $('month-filter').value = record.month; $('team-filter').value = record.team;
-      message.textContent = '실적을 샘플에 추가했습니다. 이 내용은 새로고침하면 사라집니다.';
-      await refresh();
-    } catch (error) { message.textContent = error.message || '입력 내용을 저장하지 못했습니다.'; message.classList.add('error'); }
+      const loaded = await refresh(userId);
+      if (loaded) {
+        $('month-filter').value = record.month; $('team-filter').value = record.team; render();
+        formMessage('저장했습니다. 다시 조회해도 이 자료가 유지됩니다.');
+      } else {
+        formMessage('저장은 완료했지만 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.', true);
+      }
+    } catch (error) { formMessage(error.message || '저장하지 못했습니다.', true); }
+    finally { button.disabled = false; button.textContent = 'KPI 저장'; }
   });
-  refresh();
+
+  const setup = KPIStore.initialize(window.KPI_CONFIG);
+  configured = setup.configured;
+  if (!configured) {
+    $('connection-label').textContent = 'Supabase 미설정';
+    $('connection-pill').classList.add('is-error');
+    authMessage(setup.reason + ' 로그인과 저장은 설정 후 사용할 수 있습니다.', true);
+    $('login-form').hidden = true; $('dashboard').hidden = true;
+  } else {
+    $('login-form').hidden = false;
+    authMessage('이미 등록된 Supabase 사용자로 로그인해 주세요. 이 화면에서는 계정을 만들지 않습니다.');
+    KPIStore.onAuthStateChange((_event, session) => {
+      Promise.resolve().then(() => applySession(session));
+    });
+    KPIStore.getSession().then(({ data, error }) => {
+      if (error) throw error;
+      return applySession(data.session);
+    }).catch(error => {
+      $('connection-label').textContent = 'Supabase 오류';
+      $('connection-pill').classList.add('is-error'); $('connection-pill').classList.remove('is-connected');
+      authMessage('로그인 상태를 확인하지 못했습니다. 네트워크와 Supabase 설정을 확인해 주세요. ' + (error.message || ''), true);
+      $('login-form').hidden = false;
+    });
+  }
 })();

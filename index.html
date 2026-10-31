@@ -7,20 +7,34 @@
   <title>월간 KPI · 팀 성과 대시보드</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script defer src="./config.js"></script>
   <script defer src="./core.js"></script>
   <script defer src="./app.js"></script>
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="#top" aria-label="KPI 대시보드 홈"><span class="brand-mark">K</span><span>성과보드</span></a>
-    <div class="topbar-right"><span class="sample-pill"><span class="live-dot"></span> 샘플 모드</span><span class="period-label">2026년 KPI 리포트</span></div>
+    <div class="topbar-right"><span class="sample-pill" id="connection-pill"><span class="live-dot"></span><span id="connection-label">연결 확인 중</span></span><span class="period-label">2026년 KPI 리포트</span></div>
   </header>
   <main id="top">
     <section class="intro">
       <div><p class="eyebrow">PERFORMANCE OVERVIEW</p><h1>월간 KPI</h1><p class="intro-copy">부서별 목표와 실적을 한눈에 비교해 보세요.</p></div>
-      <div class="intro-note"><span class="note-icon">i</span><span>현재 가상 샘플 데이터로 보고 있습니다.<br>입력한 내용은 새로고침하면 초기화됩니다.</span></div>
+      <div class="intro-note"><span class="note-icon">i</span><span>로그인한 사용자의 KPI 자료를 표시합니다.<br>저장된 자료는 다시 방문해도 조회됩니다.</span></div>
     </section>
 
+    <section class="card auth-card" aria-labelledby="auth-heading">
+      <div class="section-heading"><div><p class="eyebrow">ACCOUNT</p><h2 id="auth-heading">Supabase 로그인</h2></div><span id="auth-user" class="auth-user" hidden></span></div>
+      <p id="auth-message" class="auth-message" role="status" aria-live="polite">설정 확인 중입니다.</p>
+      <form id="login-form" class="login-form" hidden>
+        <label>이메일<input id="login-email" type="email" autocomplete="username" required></label>
+        <label>비밀번호<input id="login-password" type="password" autocomplete="current-password" required></label>
+        <button id="login-button" class="submit-button" type="submit">로그인</button>
+      </form>
+      <button id="logout-button" class="text-button logout-button" type="button" hidden>로그아웃</button>
+    </section>
+
+    <div id="dashboard" hidden>
     <section class="filters card" aria-labelledby="filter-heading">
       <div class="section-heading compact"><div><p class="eyebrow">REPORT FILTERS</p><h2 id="filter-heading">조회 조건</h2></div><button class="text-button" id="reset-filters" type="button">초기화 <span aria-hidden="true">↺</span></button></div>
       <div class="filter-controls"><label>조회 월<select id="month-filter"><option value="">전체 월</option></select></label><label>부서<select id="team-filter"><option value="">전체 부서</option></select></label><span id="result-caption" class="result-caption" aria-live="polite"></span></div>
@@ -35,7 +49,7 @@
     <div class="content-grid">
       <section class="card chart-card" aria-labelledby="chart-heading"><div class="section-heading"><div><p class="eyebrow">BY DEPARTMENT</p><h2 id="chart-heading">부서별 달성 현황</h2></div><span class="legend"><i></i> 달성률</span></div><div id="chart" class="chart" aria-live="polite"></div></section>
       <section class="card form-card" aria-labelledby="form-heading"><div class="section-heading"><div><p class="eyebrow">QUICK ENTRY</p><h2 id="form-heading">KPI 입력</h2></div><span class="entry-icon" aria-hidden="true">＋</span></div>
-        <form id="kpi-form" novalidate><div class="form-fields"><label>월<input id="entry-month" name="month" type="month" required value="2026-10"></label><label>부서<input id="entry-team" name="team" type="text" maxlength="80" placeholder="예: 마케팅팀" required></label><label>목표 금액 <span class="input-suffix"><input id="entry-target" name="target" type="number" inputmode="numeric" min="0" step="1" placeholder="0" required><span>원</span></span></label><label>실적 금액 <span class="input-suffix"><input id="entry-actual" name="actual" type="number" inputmode="numeric" min="0" step="1" placeholder="0" required><span>원</span></span></label></div><p id="form-message" class="form-message" role="status" aria-live="polite"></p><button class="submit-button" type="submit">샘플 실적 추가 <span aria-hidden="true">→</span></button><p class="form-hint">월·부서 조합이 같은 항목은 중복 등록할 수 없습니다.</p></form>
+        <form id="kpi-form" novalidate><div class="form-fields"><label>월<input id="entry-month" name="month" type="month" required value="2026-10"></label><label>부서<input id="entry-team" name="team" type="text" maxlength="80" placeholder="예: 마케팅팀" required></label><label>목표 금액 <span class="input-suffix"><input id="entry-target" name="target" type="number" inputmode="numeric" min="0" step="1" placeholder="0" required><span>원</span></span></label><label>실적 금액 <span class="input-suffix"><input id="entry-actual" name="actual" type="number" inputmode="numeric" min="0" step="1" placeholder="0" required><span>원</span></span></label></div><p id="form-message" class="form-message" role="status" aria-live="polite"></p><button class="submit-button" type="submit">KPI 저장 <span aria-hidden="true">→</span></button><p class="form-hint">월·부서 조합이 같은 항목은 중복 저장할 수 없습니다.</p></form>
       </section>
     </div>
 
@@ -44,6 +58,7 @@
       <div class="table-scroll"><table><thead><tr><th scope="col">월</th><th scope="col">부서</th><th scope="col" class="numeric">목표</th><th scope="col" class="numeric">실적</th><th scope="col" class="numeric">달성률</th></tr></thead><tbody id="evidence-rows"></tbody></table></div>
     </section>
     <footer><span>달성률 = 실적 합계 ÷ 목표 합계 × 100</span><span>목표 합계가 0이면 <b>목표 미설정</b>으로 표시합니다.</span></footer>
+    </div>
   </main>
 </body>
 </html>
